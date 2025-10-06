@@ -4,11 +4,12 @@ EBS Volume Snapshot Creator
 
 This script creates a snapshot of a specified EBS volume.
 It performs the following actions:
-  - Logs into AWS using hardcoded credentials (for testing only).
-  - Creates a snapshot of the given EBS volume.
-  - Tags the snapshot with a timestamp for easy identification.
-  - Waits for the snapshot to complete.
-  - Logs actions and errors for audit purposes.
+  - Logs into AWS using hardcoded credentials (for testing only)
+  - Creates a snapshot of the given EBS volume
+  - Tags the snapshot with a timestamp for traceability
+  - Waits for the snapshot to complete
+  - Logs actions and errors for audit purposes
+  - Exits with proper exit codes for automation pipelines
 
 Inputs:
   - volume_id (hardcoded in script)
@@ -16,9 +17,10 @@ Inputs:
 IAM Permissions Required:
   - ec2:CreateSnapshot
   - ec2:DescribeSnapshots
+  - ec2:CreateTags
 
 Safety Checks:
-  - Snapshot is tagged with current timestamp for traceability.
+  - Snapshot is tagged with current timestamp for traceability
 """
 
 import boto3
@@ -28,7 +30,7 @@ import sys
 from botocore.exceptions import ClientError
 
 # ---------------------------
-# Hardcoded AWS Credentials (⚠️ Testing only!)
+# Hardcoded AWS Credentials ( Testing only!)
 # ---------------------------
 AWS_ACCESS_KEY = "youraccesskey"
 AWS_SECRET_KEY = "yoursecretekey"
@@ -49,12 +51,17 @@ logging.basicConfig(
 class EBSSnapshotManager:
     def __init__(self, access_key, secret_key, region):
         """Initialize AWS EC2 client"""
-        self.ec2 = boto3.client(
-            "ec2",
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region
-        )
+        try:
+            self.ec2 = boto3.client(
+                "ec2",
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region
+            )
+            logging.info(f"Connected to AWS region: {region}")
+        except Exception as e:
+            logging.error(f"Failed to create EC2 client: {e}")
+            sys.exit(1)
 
     def create_snapshot(self, volume_id):
         """Create snapshot of given EBS volume"""
@@ -88,24 +95,25 @@ class EBSSnapshotManager:
 
         except ClientError as e:
             logging.error(f"Error creating snapshot: {e}")
-            return None
+            sys.exit(1)
 
     def _wait_for_snapshot(self, snapshot_id):
         """Wait until snapshot is completed"""
-        logging.info(f"Waiting for snapshot {snapshot_id} to complete...")
-        waiter = self.ec2.get_waiter("snapshot_completed")
-        waiter.wait(SnapshotIds=[snapshot_id])
-
+        try:
+            logging.info(f"Waiting for snapshot {snapshot_id} to complete...")
+            waiter = self.ec2.get_waiter("snapshot_completed")
+            waiter.wait(SnapshotIds=[snapshot_id])
+        except ClientError as e:
+            logging.error(f"Error while waiting for snapshot: {e}")
+            sys.exit(1)
 
 def main():
+    """Main execution flow"""
     manager = EBSSnapshotManager(AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION)
     snapshot_id = manager.create_snapshot(VOLUME_ID)
 
-    if snapshot_id:
-        logging.info(f"Snapshot created successfully: {snapshot_id}")
-    else:
-        logging.error("Snapshot creation failed.")
-
+    logging.info(f"Snapshot created successfully: {snapshot_id}")
+    sys.exit(0)  # Exit with 0 to indicate success
 
 if __name__ == "__main__":
     main()

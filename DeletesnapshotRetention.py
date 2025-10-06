@@ -8,10 +8,15 @@ It performs the following actions:
   - Lists all snapshots owned by the account
   - Deletes snapshots older than `RETENTION_DAYS`
   - Logs actions and deleted snapshots for auditing
+  - Exits with proper exit codes for automation pipelines
 
 Safety Checks:
   - Only deletes snapshots older than retention period
   - Logs all deletions
+
+IAM Permissions Required:
+  - ec2:DescribeSnapshots
+  - ec2:DeleteSnapshot
 """
 
 import boto3
@@ -21,16 +26,16 @@ import sys
 from botocore.exceptions import ClientError
 
 # ---------------------------
-# Hardcoded AWS Credentials (Testing only!)
+# Hardcoded AWS Credentials (⚠️ Testing only!)
 # ---------------------------
 AWS_ACCESS_KEY = "youraccesskey"
 AWS_SECRET_KEY = "yoursecretekey"
 AWS_REGION = "ap-south-1"
 
 # ---------------------------
-# Hardcoded retention period
+# Hardcoded retention period (in days)
 # ---------------------------
-RETENTION_DAYS = 120  # Snapshots older than 30 days will be deleted
+RETENTION_DAYS = 120  # Snapshots older than this will be deleted
 
 # Configure logging
 logging.basicConfig(
@@ -42,12 +47,17 @@ logging.basicConfig(
 class EBSSnapshotCleaner:
     def __init__(self, access_key, secret_key, region):
         """Initialize AWS EC2 client"""
-        self.ec2 = boto3.client(
-            "ec2",
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region
-        )
+        try:
+            self.ec2 = boto3.client(
+                "ec2",
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region
+            )
+            logging.info(f"Connected to AWS region: {region}")
+        except Exception as e:
+            logging.error(f"Failed to create EC2 client: {e}")
+            sys.exit(1)
 
     def delete_old_snapshots(self, retention_days):
         """Delete snapshots older than retention_days"""
@@ -64,20 +74,23 @@ class EBSSnapshotCleaner:
                 snapshot_id = snap['SnapshotId']
 
                 if start_time < cutoff_date:
-                    logging.info(f"Deleting snapshot {snapshot_id}, created on {start_time}")
-                    self.ec2.delete_snapshot(SnapshotId=snapshot_id)
-                    deleted_snapshots.append(snapshot_id)
+                    try:
+                        logging.info(f"Deleting snapshot {snapshot_id}, created on {start_time}")
+                        self.ec2.delete_snapshot(SnapshotId=snapshot_id)
+                        deleted_snapshots.append(snapshot_id)
+                    except ClientError as e:
+                        logging.error(f"Failed to delete snapshot {snapshot_id}: {e}")
 
             if deleted_snapshots:
                 logging.info(f"✅ Deleted snapshots: {', '.join(deleted_snapshots)}")
+                sys.exit(0)  # Success
             else:
                 logging.info("No snapshots older than retention period found.")
-
-            return deleted_snapshots
+                sys.exit(0)  # Success, nothing to delete
 
         except ClientError as e:
-            logging.error(f"Error deleting snapshots: {e}")
-            return []
+            logging.error(f"Error listing snapshots: {e}")
+            sys.exit(1)
 
 
 def main():
